@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model weights (large files)
+*.pt
+*.pth
+*.weights
+*.onnx
+
+# Outputs
+static/outputs/
+static/uploads/
+
+# Logs
+*.log
+
+# Test files
+test_*.py
+*_view.png
+*_4x.png
+*_3x.png
+*_half.png
+aligned_crop_*.png
+bboxes_comparison.png
+full_with_bboxes*.png
+roi_proposta_*.png
+context_proposta_*.png
+debug_*.png

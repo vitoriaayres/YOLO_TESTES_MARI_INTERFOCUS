@@ -170,6 +170,13 @@ CONFIG = {
     "unresolved_layer_second_pass": True,
     "unresolved_max_crops": 12,
     "unresolved_max_variants_per_crop": 20,
+    # Tempo máximo (s) somado de todas as segundas passagens de uma imagem.
+    # None = sem limite. Caixas que não forem refinadas a tempo ficam sem leitura.
+    "second_pass_time_budget_s": None,
+    # Filtros de leitura. None = aceita tudo (comportamento original).
+    # Ex.: {"CODE128", "CODE39"} e r"^[A-Z0-9]{6,}$".
+    "allowed_barcode_types": None,
+    "allowed_value_pattern": None,
     # Double check: promove candidato não lido somente por consenso visual.
     "double_check_similar_unread": True,
     "double_check_min_width_similarity": 0.55,
@@ -182,7 +189,7 @@ CONFIG = {
     "double_check_min_valid_row_ratio": 0.35,
     "double_check_min_direction_ratio": 0.95,
     "enable_label_fallback": False,
-    "enable_opencv_fallback": False,
+    "enable_opencv_fallback": True,
     # A varredura de muitos ângulos é o estágio mais lento. Ative apenas
     # para investigar imagens que falharam em todos os outros caminhos.
     "enable_angular_fallback": False,
@@ -836,7 +843,7 @@ def decode_pyzbar(image):
 def decode_zxing(image):
     try:
         items = zxingcpp.read_barcodes(
-            image, try_rotate=True, try_downscale=True, try_invert=True
+            image, try_rotate=True, try_downscale=True
         )
     except Exception:
         return None
@@ -964,7 +971,7 @@ def decode_zxing_full_image_regions(image, config=CONFIG):
     # Uma leitura global preserva códigos próximos como símbolos independentes.
     try:
         items = zxingcpp.read_barcodes(
-            image, try_rotate=True, try_downscale=True, try_invert=True
+            image, try_rotate=True, try_downscale=True
         )
     except Exception:
         return []
@@ -1622,7 +1629,7 @@ def barcode_refinement_variants(crop, config=CONFIG):
     return variants
 
 
-def decode_refinement_cascade(crops, config=CONFIG):
+def decode_refinement_cascade(crops, config=CONFIG, deadline=None):
     readings = []
     attempts = []
     crop_images = {name: crop for name, crop in crops}
@@ -1631,8 +1638,12 @@ def decode_refinement_cascade(crops, config=CONFIG):
         1, int(config.get("unresolved_max_variants_per_crop", 12))
     )
     for crop_name, crop in crops[:maximum_crops]:
+        if deadline is not None and perf_counter() > deadline:
+            break
         variants = barcode_refinement_variants(crop, config)[:maximum_variants]
         for variant_name, variant in variants:
+            if deadline is not None and perf_counter() > deadline:
+                break
             found = decoder_readings_for_variant(
                 variant, crop_name, variant_name
             )
@@ -1641,14 +1652,14 @@ def decode_refinement_cascade(crops, config=CONFIG):
                 "crop": crop_name, "variant": variant_name,
                 "readings": len(found),
             })
-            result = choose_consensus_decode_for_band(readings, config)
+            result = choose_consensus_decode_for_band(readings, config, refinement_pass=True)
             if result is not None:
                 result["early_stop"] = True
                 result["refinement_second_pass"] = True
                 result["attempted_variants"] = len(attempts)
                 winner = crop_images.get(result.get("crop"), crop)
                 return result, readings, attempts, winner
-    result = choose_consensus_decode_for_band(readings, config)
+    result = choose_consensus_decode_for_band(readings, config, refinement_pass=True)
     if result is not None:
         result["early_stop"] = False
         result["refinement_second_pass"] = True
@@ -1661,10 +1672,10 @@ def decoder_readings_for_variant(variant, crop_name, variant_name):
     readings = []
     # ZXing-C++ com múltiplas configurações para CODE128 difícil
     zxing_configs = [
-        {"try_rotate": True, "try_downscale": True, "try_invert": True},
-        {"try_rotate": True, "try_downscale": False, "try_invert": True},
-        {"try_rotate": False, "try_downscale": True, "try_invert": True},
-        {"try_rotate": True, "try_downscale": True, "try_invert": False},
+        {"try_rotate": True, "try_downscale": True},
+        {"try_rotate": True, "try_downscale": False},
+        {"try_rotate": False, "try_downscale": True},
+        {"try_rotate": True, "try_downscale": True},
     ]
     zxing_found_any = False
     for config_idx, zxing_config in enumerate(zxing_configs):
@@ -1744,7 +1755,7 @@ def collect_all_decodes_from_band(crops):
         for variant_name, variant in preprocessing_variants_for_band(crop):
             try:
                 zxing_items = zxingcpp.read_barcodes(
-                    variant, try_rotate=True, try_downscale=True, try_invert=True
+                    variant, try_rotate=True, try_downscale=True
                 )
             except Exception:
                 zxing_items = []
@@ -1781,11 +1792,13 @@ def collect_all_decodes_from_band(crops):
     return readings
 
 
-def choose_consensus_decode_for_band(readings, config=CONFIG):
+def choose_consensus_decode_for_band(readings, config=CONFIG, refinement_pass=False):
     groups = {}
     for reading in readings:
         barcode_type = normalized_barcode_type(reading["type"])
         if barcode_type not in ONE_DIMENSIONAL_BARCODE_TYPES:
+            continue
+        if not passes_reading_filters(reading["type"], reading["value"], config):
             continue
         key = (barcode_type, reading["value"])
         groups.setdefault(key, []).append(reading)
@@ -1793,31 +1806,49 @@ def choose_consensus_decode_for_band(readings, config=CONFIG):
         return None
 
     retail_types = {"EAN8", "EAN13", "UPCA", "UPCE"}
+    alphanum_types = {"CODE39", "CODE93", "CODE128"}
     accepted = []
     for (barcode_type, value), items in groups.items():
         engines = {item["decoder"] for item in items}
         variants = {(item["crop"], item["variant"]) for item in items}
         crop_names = {item["crop"] for item in items}
         if barcode_type in retail_types:
-            retail_ok = (
-                (len(engines) >= 2 and len(variants) >= 2)
-                or (
-                    len(crop_names) >= 3
-                    and len(variants) >= max(6, config["retail_min_variant_votes"])
-                )
-            )
-            if not retail_ok:
-                single_engine_high_agreement = (
-                    len(engines) == 1
-                    and len(crop_names) >= 4
-                    and len(variants) >= 3
+            if refinement_pass:
+                retail_ok = (
+                    len(variants) >= 2
                     and all(item["value"] == value for item in items)
                 )
-                if single_engine_high_agreement:
-                    retail_ok = True
-                else:
-                    continue
-        priority = 2 if barcode_type in {"CODE39", "CODE93", "CODE128"} else 1
+            else:
+                retail_ok = (
+                    (len(engines) >= 2 and len(variants) >= 2)
+                    or (
+                        len(crop_names) >= 3
+                        and len(variants) >= max(6, config["retail_min_variant_votes"])
+                    )
+                )
+                if not retail_ok:
+                    single_engine_high_agreement = (
+                        len(engines) == 1
+                        and len(crop_names) >= 4
+                        and len(variants) >= 3
+                        and all(item["value"] == value for item in items)
+                    )
+                    if single_engine_high_agreement:
+                        retail_ok = True
+                    else:
+                        continue
+            if not retail_ok:
+                continue
+        elif barcode_type in alphanum_types:
+            # Code128/39/93: geralmente só ZXing lê bem. Aceita se houver
+            # concordância de valor entre múltiplas variants (1 engine OK).
+            alphanum_ok = (
+                len(variants) >= 2
+                and all(item["value"] == value for item in items)
+            )
+            if not alphanum_ok:
+                continue
+        priority = 2 if barcode_type in alphanum_types else 1
         accepted.append((
             priority, len(engines), len(variants), len(value),
             barcode_type, value, items,
@@ -2531,6 +2562,11 @@ def decoded_region_from_roboflow(
 
 def decode_roboflow_candidates(image, config=CONFIG):
     proposals, api_status = roboflow_barcode_candidates(image, config)
+    second_pass_budget = config.get("second_pass_time_budget_s")
+    second_pass_deadline = (
+        perf_counter() + float(second_pass_budget)
+        if second_pass_budget is not None else None
+    )
     decoded_regions = []
     tested_strips = []
     debug_rows = []
@@ -2555,6 +2591,10 @@ def decode_roboflow_candidates(image, config=CONFIG):
         if (
             direct_result is None
             and config.get("unresolved_layer_second_pass", True)
+            and (
+                second_pass_deadline is None
+                or perf_counter() < second_pass_deadline
+            )
         ):
             refinement_executed = True
             refinement_crops = roboflow_refinement_crops(
@@ -2563,7 +2603,9 @@ def decode_roboflow_candidates(image, config=CONFIG):
             (
                 direct_result, refinement_readings,
                 refinement_attempts, winning_crop,
-            ) = decode_refinement_cascade(refinement_crops, config)
+            ) = decode_refinement_cascade(
+                refinement_crops, config, deadline=second_pass_deadline
+            )
             direct_readings.extend(refinement_readings)
             if direct_readings and proposal_index <= 3:
                 print(f"DEBUG RAW READINGS #{proposal_index}: total={len(direct_readings)}")
@@ -3614,15 +3656,36 @@ def show_label_strip_debug(debug):
 
 ONE_DIMENSIONAL_BARCODE_TYPES = {
     "CODABAR", "CODE39", "CODE93", "CODE128",
+    "BARCODEFORMATCODABAR", "BARCODEFORMATCODE39", "BARCODEFORMATCODE93", "BARCODEFORMATCODE128",
     "DATABAR", "DATABAREXP", "DATABAREXPANDED",
     "DATABARLIMITED", "EAN2", "EAN5", "EAN8", "EAN13",
+    "BARCODEFORMATEAN8", "BARCODEFORMATEAN13",
     "I25", "ITF", "ISBN10", "ISBN13",
     "UPCA", "UPCE",
+    "BARCODEFORMATUPCA", "BARCODEFORMATUPCE",
 }
 
 
 def normalized_barcode_type(value):
     return re.sub(r"[^A-Z0-9]+", "", str(value).upper())
+
+
+def canonical_barcode_type(value):
+    # zxing devolve "BarcodeFormat.CODE128", pyzbar "CODE128"; ambos -> "CODE128".
+    normalized = normalized_barcode_type(value)
+    if normalized.startswith("BARCODEFORMAT"):
+        normalized = normalized[len("BARCODEFORMAT"):]
+    return normalized
+
+
+def passes_reading_filters(barcode_type, value, config=CONFIG):
+    allowed_types = config.get("allowed_barcode_types")
+    if allowed_types and canonical_barcode_type(barcode_type) not in allowed_types:
+        return False
+    pattern = config.get("allowed_value_pattern")
+    if pattern and not re.fullmatch(pattern, str(value).strip()):
+        return False
+    return True
 
 
 def is_confirmed_1d_barcode(region):
@@ -3640,6 +3703,16 @@ def is_confirmed_1d_barcode(region):
     )
 
 
+def is_confirmed_2d_barcode(region):
+    """Check if a 2D barcode (QR, DataMatrix, etc.) is valid."""
+    barcode_type = normalized_barcode_type(region.get("type", ""))
+    return bool(
+        region.get("decoded")
+        and str(region.get("value", "")).strip()
+        and barcode_type in {"BARCODEFORMATQRCODE", "BARCODEFORMATDATAMATRIX", "BARCODEFORMATAZTEC", "BARCODEFORMATPDF417"}
+    )
+
+
 def intersection_over_smaller(box_a, box_b):
     ax, ay, aw, ah = box_a
     bx, by, bw, bh = box_b
@@ -3654,7 +3727,13 @@ def intersection_over_smaller(box_a, box_b):
 
 def keep_confirmed_barcodes(regions, config=CONFIG):
     # Regra central do modo estrito: sem valor decodificado, não há detecção final.
-    confirmed = [region for region in regions if is_confirmed_1d_barcode(region)]
+    confirmed = [
+        region for region in regions
+        if is_confirmed_1d_barcode(region)
+        and passes_reading_filters(
+            region.get("type", ""), region.get("value", ""), config
+        )
+    ]
     alphanumeric_types = {"CODE39", "CODE93", "CODE128"}
     confirmed.sort(
         key=lambda item: (
@@ -3844,7 +3923,7 @@ def analyze_barcode_image(
     direct_priority_regions = [
         region for region in direct_regions
         if normalized_barcode_type(region.get("type", ""))
-        in {"CODE39", "CODE93", "CODE128"}
+        in {"CODE39", "CODE93", "CODE128", "EAN8", "EAN13", "UPCA", "UPCE"}
     ]
     timings["tempo_leitura_global_s"] = perf_counter() - stage_start
 
@@ -3932,17 +4011,20 @@ def analyze_barcode_image(
             layered_regions
         )
     timings["tempo_angular_s"] = perf_counter() - stage_start
-    # Fallback somente para códigos alfanuméricos completos. EAN/UPC nunca
+    # Fallback para códigos alfanuméricos e QR. EAN/UPC nunca
     # entram pelo caminho antigo, pois podem ser fragmentos de um Code 128.
-    fallback_types = {"CODE39", "CODE93", "CODE128"}
+    fallback_types = {"CODE39", "CODE93", "CODE128", "BARCODEFORMATQRCODE"}
     fallback_regions = [
         region for region in candidates + direct_regions
         if normalized_barcode_type(region.get("type", ""))
         in fallback_types
     ]
+    # Inclui candidates (resultados do fallback OpenCV) diretamente para
+    # permitir EAN/UPC que o fallback antigo filtra (comentário linha 3955-3956).
+    # keep_confirmed_barcodes já valida retail codes via symbol_width_ratio.
     regions = keep_confirmed_barcodes(
         roboflow_consensus + label_consensus
-        + layered_consensus + fallback_regions, CONFIG
+        + layered_consensus + fallback_regions + candidates, CONFIG
     )
     annotated = annotate_confirmed_barcodes(image, regions)
     visual_start = perf_counter()

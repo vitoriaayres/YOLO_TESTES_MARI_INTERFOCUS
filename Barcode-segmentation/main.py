@@ -9,7 +9,8 @@ from werkzeug.utils import secure_filename
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()  # lê o arquivo .env na mesma pasta e define as variáveis de ambiente
+    # Carrega .env da pasta do script (Barcode-segmentation/)
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 except ImportError:
     pass  # sem python-dotenv instalado, só funciona se a variável já estiver setada no terminal
 

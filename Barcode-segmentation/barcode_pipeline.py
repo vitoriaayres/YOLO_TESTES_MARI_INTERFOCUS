@@ -47,7 +47,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import zxingcpp
-from inference_sdk import InferenceConfiguration, InferenceHTTPClient
 from pyzbar.pyzbar import decode as zbar_decode
 
 try:
@@ -136,9 +135,15 @@ CONFIG = {
     # ================================================================
     # True usa o modelo treinado. False executa somente OpenCV/decoders.
     "roboflow_enabled": True,
-    # 'local' baixa os pesos uma vez e processa na sessão do Colab.
+    # 'rfdetr' roda o RF-DETR próprio (ONNX, sem custo nem API key).
+    # 'local' baixa os pesos do Roboflow uma vez e processa na máquina.
     # 'hosted' envia cada imagem ao servidor serverless da Roboflow.
-    "roboflow_inference_mode": "local",
+    "roboflow_inference_mode": os.environ.get("DETECTOR_BACKEND", "rfdetr"),
+    # Modelo RF-DETR Small exportado em ONNX (modo 'rfdetr').
+    "rfdetr_onnx_path": os.environ.get(
+        "RFDETR_ONNX_PATH",
+        str(Path(__file__).resolve().parent / "models" / "rfdetr_v2.onnx"),
+    ),
     # Evita voltar silenciosamente ao modo lento se a carga local falhar.
     "roboflow_hosted_fallback_on_local_error": False,
     # Projeto e versão publicados no Roboflow Universe.
@@ -232,15 +237,73 @@ def validate_roboflow_config(config=CONFIG):
         raise ValueError("roboflow_iou_threshold deve estar entre 0 e 1.")
 
 
+class RFDETROnnxDetector:
+    """RF-DETR Small em ONNX com a mesma interface de infer() do Roboflow.
+
+    Reproduz o pré e o pós-processamento do RFDETRSmall.predict() (resize
+    quadrado, normalização ImageNet, sigmoid + top-k) sem precisar de torch.
+    """
+
+    MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+    def __init__(self, onnx_path):
+        import onnxruntime as ort
+        self.session = ort.InferenceSession(
+            onnx_path, providers=["CPUExecutionProvider"]
+        )
+        model_input = self.session.get_inputs()[0]
+        self.input_name = model_input.name
+        self.resolution = int(model_input.shape[-1])
+
+    def infer(self, image, confidence=0.1, iou_threshold=None, max_detections=50):
+        # iou_threshold não se aplica: o DETR não gera caixas duplicadas
+        # para suprimir; o pipeline ainda remove sobreposições depois.
+        height, width = image.shape[:2]
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        tensor = cv2.resize(
+            rgb, (self.resolution, self.resolution),
+            interpolation=cv2.INTER_LINEAR,
+        ).astype(np.float32) / 255.0
+        tensor = ((tensor - self.MEAN) / self.STD).transpose(2, 0, 1)[None]
+        boxes, logits = self.session.run(None, {self.input_name: tensor})
+        scores = 1.0 / (1.0 + np.exp(-logits[0].max(axis=1)))
+        predictions = []
+        for query in np.argsort(-scores)[:max_detections]:
+            if scores[query] < confidence:
+                break
+            center_x, center_y, box_width, box_height = boxes[0][query]
+            predictions.append({
+                "x": float(center_x * width), "y": float(center_y * height),
+                "width": float(box_width * width),
+                "height": float(box_height * height),
+                "confidence": float(scores[query]), "class": "barcode",
+            })
+        return {"predictions": predictions}
+
+
 def create_roboflow_backend(config=CONFIG):
     if not config["roboflow_enabled"]:
         return None, None, "desativado"
     validate_roboflow_config(config)
+    mode = str(config.get("roboflow_inference_mode", "rfdetr")).lower()
+    if mode not in {"rfdetr", "local", "hosted"}:
+        raise ValueError(
+            "roboflow_inference_mode deve ser 'rfdetr', 'local' ou 'hosted'."
+        )
+    if mode == "rfdetr":
+        onnx_path = config["rfdetr_onnx_path"]
+        print("\nDETECTOR RF-DETR ATIVO")
+        print(f"  modelo: {onnx_path}")
+        if not os.path.isfile(onnx_path):
+            print("Arquivo ONNX não encontrado; detector desativado.")
+            return None, None, "falha_rfdetr"
+        started = perf_counter()
+        detector = RFDETROnnxDetector(onnx_path)
+        print(f"RF-DETR pronto em {perf_counter() - started:.1f}s.")
+        return detector, None, "rfdetr"
     print("\nCONFIGURAÇÕES DO ROBOFLOW ATIVAS")
     print(f"  modelo: {config['roboflow_model_id']}")
-    mode = str(config.get("roboflow_inference_mode", "local")).lower()
-    if mode not in {"local", "hosted"}:
-        raise ValueError("roboflow_inference_mode deve ser 'local' ou 'hosted'.")
     print(f"  execução: {mode}")
     print(f"  confiança inicial: {config['roboflow_server_confidence']:.2f}")
     print(f"  confiança mínima local: {config['roboflow_min_confidence']:.2f}")
@@ -286,6 +349,7 @@ def create_roboflow_backend(config=CONFIG):
             )
             if not allow_hosted:
                 return None, None, "falha_local"
+    from inference_sdk import InferenceConfiguration, InferenceHTTPClient
     client = InferenceHTTPClient(
         api_url="https://serverless.roboflow.com",
         api_key=api_key,
@@ -2338,7 +2402,13 @@ def roboflow_barcode_candidates(image, config=CONFIG):
         image, config["roboflow_max_side"]
     )
     try:
-        if ROBOFLOW_BACKEND == "local":
+        if ROBOFLOW_BACKEND == "rfdetr":
+            response = ROBOFLOW_MODEL.infer(
+                working,
+                confidence=config["roboflow_server_confidence"],
+                max_detections=config["roboflow_max_detections"],
+            )
+        elif ROBOFLOW_BACKEND == "local":
             try:
                 response = ROBOFLOW_MODEL.infer(
                     working,

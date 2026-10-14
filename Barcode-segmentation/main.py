@@ -27,12 +27,13 @@ app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-print(f"Backend Roboflow ativo: {bp.ROBOFLOW_BACKEND}")
-if bp.ROBOFLOW_BACKEND == "desativado":
+print(f"Detector ativo: {bp.ROBOFLOW_BACKEND}")
+if bp.ROBOFLOW_BACKEND not in {"rfdetr", "local", "hosted"}:
     print(
-        "AVISO: ROBOFLOW_API_KEY não foi definida (ou o modelo falhou ao "
-        "carregar). O pipeline vai rodar só com os fallbacks locais, que "
-        "estão desligados por padrão no CONFIG (enable_opencv_fallback=False)."
+        "AVISO: o detector não carregou (modelo ONNX ausente ou, nos modos "
+        "Roboflow, ROBOFLOW_API_KEY não definida). O pipeline vai rodar só "
+        "com os fallbacks locais, que estão desligados por padrão no CONFIG "
+        "(enable_opencv_fallback=False)."
     )
 
 

@@ -9,7 +9,7 @@ Diferenças em relação ao main.py (interface web):
   - Imagens de debug só são devolvidas quando pedidas (?debug=true).
 
 Endpoints:
-  GET  /api/v1/health   -> status do serviço e do backend Roboflow
+  GET  /api/v1/health   -> status do serviço e do detector
   POST /api/v1/decode   -> multipart/form-data com o campo "image"
 
 Rodar localmente:
@@ -42,6 +42,11 @@ MAX_UPLOAD_MB = int(os.environ.get("API_MAX_UPLOAD_MB", "10"))
 # (12+ MP) não ajudam a leitura e deixam o processamento bem mais lento.
 MAX_IMAGE_SIDE = int(os.environ.get("API_MAX_IMAGE_SIDE", "2000"))
 
+def _env_flag(name, default):
+    value = os.environ.get(name, "").strip().lower()
+    return default if not value else value in {"1", "true", "yes", "on"}
+
+
 # Filtros pensados para etiquetas de equipamentos (serial/MAC em Code 128/39).
 # Códigos EAN/UPC lidos nessas etiquetas são fragmentos falsos de um Code 128.
 # Para aceitar todos os formatos, defina API_ALLOWED_FORMATS e/ou
@@ -58,11 +63,16 @@ SECOND_PASS_BUDGET_S = float(os.environ.get("API_SECOND_PASS_BUDGET_S", "6"))
 bp.CONFIG["allowed_barcode_types"] = ALLOWED_FORMATS or None
 bp.CONFIG["allowed_value_pattern"] = VALUE_PATTERN
 bp.CONFIG["second_pass_time_budget_s"] = SECOND_PASS_BUDGET_S
+# Divide caixas que englobam códigos empilhados. Com o RF-DETR isso leva o
+# v2 de 179 para 180/197 no gabarito; com o Roboflow fica desligado.
+bp.CONFIG["roboflow_split_unresolved_boxes"] = _env_flag(
+    "API_SPLIT_UNRESOLVED_BOXES", bp.ROBOFLOW_BACKEND == "rfdetr"
+)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_MB * 1024 * 1024
 
-# O pipeline compartilha o modelo Roboflow e o CONFIG globais, e não foi
+# O pipeline compartilha o detector e o CONFIG globais, e não foi
 # escrito pensando em threads. Serializamos as análises dentro do processo;
 # para atender mais requisições em paralelo, suba mais workers (processos).
 _pipeline_lock = threading.Lock()
@@ -183,11 +193,11 @@ def root():
 
 @app.get("/api/v1/health")
 def health():
-    roboflow_ok = bp.ROBOFLOW_BACKEND in {"local", "hosted"}
+    detector_ok = bp.ROBOFLOW_BACKEND in {"rfdetr", "local", "hosted"}
     database_ok = equipment_repo.is_available()
     return jsonify({
-        "status": "ok" if roboflow_ok and database_ok else "degraded",
-        "roboflow_backend": bp.ROBOFLOW_BACKEND,
+        "status": "ok" if detector_ok and database_ok else "degraded",
+        "detector_backend": bp.ROBOFLOW_BACKEND,
         "database": "ok" if database_ok else "indisponivel",
     })
 
@@ -224,10 +234,16 @@ def decode():
         )
     processing_ms = round((perf_counter() - start) * 1000)
 
-    barcodes = [
-        _region_to_json(region, index)
-        for index, region in enumerate(regions, 1)
-    ]
+    # Duas caixas podem ler o mesmo código (ex.: uma caixa grande e a
+    # metade dela após a divisão); o app recebe cada valor uma vez só,
+    # com a leitura de maior confiança.
+    unique = {}
+    for index, region in enumerate(regions, 1):
+        barcode = _region_to_json(region, index)
+        kept = unique.get(barcode["value"])
+        if kept is None or (barcode["confidence"] or 0) > (kept["confidence"] or 0):
+            unique[barcode["value"]] = barcode
+    barcodes = sorted(unique.values(), key=lambda b: b["index"])
     # O banco é o filtro final: leituras falsas simplesmente não existem nele.
     found = _lookup_equipment([b["value"] for b in barcodes])
     identified = {}
@@ -262,7 +278,7 @@ def decode():
 
 
 if __name__ == "__main__":
-    print(f"Backend Roboflow ativo: {bp.ROBOFLOW_BACKEND}")
+    print(f"Detector ativo: {bp.ROBOFLOW_BACKEND}")
     app.run(
         host=os.environ.get("API_HOST", "0.0.0.0"),
         port=int(os.environ.get("API_PORT", "5001")),

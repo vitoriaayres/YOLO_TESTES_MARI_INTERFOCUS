@@ -77,9 +77,9 @@ def main():
     parser.add_argument("--output", default="avaliacao_roboflow.csv")
     args = parser.parse_args()
 
-    if bp.ROBOFLOW_BACKEND != "local" and bp.ROBOFLOW_BACKEND != "hosted":
-        sys.exit(f"Roboflow não está ativo (backend={bp.ROBOFLOW_BACKEND}); "
-                 "confira ROBOFLOW_API_KEY no .env.")
+    if bp.ROBOFLOW_BACKEND not in {"rfdetr", "local", "hosted"}:
+        sys.exit(f"Detector não está ativo (backend={bp.ROBOFLOW_BACKEND}); "
+                 "confira o modelo ONNX ou a ROBOFLOW_API_KEY no .env.")
 
     expected_map = load_expected(args.expected)
     files = sorted(

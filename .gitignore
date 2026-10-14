@@ -184,3 +184,6 @@ test_*.py
 
 # IDE
 .vscode/
+# Pesos do RF-DETR (100+ MB, não cabem no GitHub)
+*.pth
+*.onnx

@@ -1,5 +1,5 @@
 """
-API JSON para leitura de códigos de barras, pensada para consumo por apps mobile.
+API JSON de identificação e decodificação de códigos de barras.
 
 Diferenças em relação ao main.py (interface web):
   - Responde sempre JSON (inclusive erros), sem templates.
@@ -12,10 +12,13 @@ Endpoints:
   GET  /api/v1/health   -> status do serviço e do detector
   POST /api/v1/decode   -> multipart/form-data com o campo "image"
 
+Contrato completo em API.md.
+
 Rodar localmente:
   python api.py
 """
 import base64
+import hmac
 import io
 import os
 import threading
@@ -35,7 +38,6 @@ except ImportError:
     pass
 
 import barcode_pipeline as bp
-import equipment_repository as equipment_repo
 
 MAX_UPLOAD_MB = int(os.environ.get("API_MAX_UPLOAD_MB", "10"))
 # Imagens maiores que isso são reduzidas antes do pipeline; fotos de celular
@@ -69,6 +71,16 @@ bp.CONFIG["roboflow_split_unresolved_boxes"] = _env_flag(
     "API_SPLIT_UNRESOLVED_BOXES", bp.ROBOFLOW_BACKEND == "rfdetr"
 )
 
+# Se definida, toda rota (menos / e /health) exige o cabeçalho X-API-Key.
+# Vazia = sem autenticação (quem hospeda pode proteger num gateway).
+API_KEY = os.environ.get("API_KEY", "").strip() or None
+
+# Consulta ao banco de equipamentos (SQLite de exemplo). A identificação do
+# equipamento fica com quem consome a API, por isso vem desligada.
+EQUIPMENT_LOOKUP = _env_flag("API_EQUIPMENT_LOOKUP", False)
+if EQUIPMENT_LOOKUP:
+    import equipment_repository as equipment_repo
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_MB * 1024 * 1024
 
@@ -88,6 +100,16 @@ class ApiError(Exception):
 
 def _error_response(status, code, message):
     return jsonify({"error": {"code": code, "message": message}}), status
+
+
+@app.before_request
+def _check_api_key():
+    if API_KEY is None or request.path in {"/", "/api/v1/health"}:
+        return None
+    sent = request.headers.get("X-API-Key", "")
+    if not hmac.compare_digest(sent.encode(), API_KEY.encode()):
+        raise ApiError(401, "unauthorized", "Cabeçalho X-API-Key ausente ou inválido.")
+    return None
 
 
 @app.errorhandler(ApiError)
@@ -181,37 +203,38 @@ def _is_truthy(value):
 
 @app.get("/")
 def root():
-    return jsonify({
-        "service": "barcode-api",
-        "endpoints": {
-            "GET /api/v1/health": "status do serviço",
-            "POST /api/v1/decode": 'multipart/form-data, campo "image" (?debug=true opcional)',
-            "GET /api/v1/equipment/<codigo>": "consulta um código já lido no celular",
-        },
-    })
+    endpoints = {
+        "GET /api/v1/health": "status do serviço",
+        "POST /api/v1/decode": 'multipart/form-data, campo "image" (?debug=true opcional)',
+    }
+    if EQUIPMENT_LOOKUP:
+        endpoints["GET /api/v1/equipment/<codigo>"] = "consulta um código já lido no celular"
+    return jsonify({"service": "barcode-api", "endpoints": endpoints})
 
 
 @app.get("/api/v1/health")
 def health():
     detector_ok = bp.ROBOFLOW_BACKEND in {"rfdetr", "local", "hosted"}
-    database_ok = equipment_repo.is_available()
-    return jsonify({
-        "status": "ok" if detector_ok and database_ok else "degraded",
-        "detector_backend": bp.ROBOFLOW_BACKEND,
-        "database": "ok" if database_ok else "indisponivel",
-    })
+    response = {"detector_backend": bp.ROBOFLOW_BACKEND}
+    database_ok = True
+    if EQUIPMENT_LOOKUP:
+        database_ok = equipment_repo.is_available()
+        response["database"] = "ok" if database_ok else "indisponivel"
+    response["status"] = "ok" if detector_ok and database_ok else "degraded"
+    return jsonify(response)
 
 
-@app.get("/api/v1/equipment/<code>")
-def equipment(code):
-    normalized = equipment_repo.normalize_code(code)
-    found = _lookup_equipment([normalized])
-    if normalized not in found:
-        raise ApiError(
-            404, "equipment_not_found",
-            f"Nenhum equipamento cadastrado com o código {normalized}.",
-        )
-    return jsonify({"code": normalized, "equipment": found[normalized]})
+if EQUIPMENT_LOOKUP:
+    @app.get("/api/v1/equipment/<code>")
+    def equipment(code):
+        normalized = equipment_repo.normalize_code(code)
+        found = _lookup_equipment([normalized])
+        if normalized not in found:
+            raise ApiError(
+                404, "equipment_not_found",
+                f"Nenhum equipamento cadastrado com o código {normalized}.",
+            )
+        return jsonify({"code": normalized, "equipment": found[normalized]})
 
 
 @app.post("/api/v1/decode")
@@ -244,26 +267,28 @@ def decode():
         if kept is None or (barcode["confidence"] or 0) > (kept["confidence"] or 0):
             unique[barcode["value"]] = barcode
     barcodes = sorted(unique.values(), key=lambda b: b["index"])
-    # O banco é o filtro final: leituras falsas simplesmente não existem nele.
-    found = _lookup_equipment([b["value"] for b in barcodes])
-    identified = {}
-    for barcode in barcodes:
-        match = found.get(equipment_repo.normalize_code(barcode["value"]))
-        barcode["found"] = match is not None
-        barcode["equipment_id"] = match["id"] if match else None
-        if match:
-            identified.setdefault(match["id"], match)
 
     height, width = image.shape[:2]
     response = {
-        # Equipamentos encontrados (sem repetição, mesmo que serial e MAC
-        # da mesma etiqueta tenham sido lidos). Vazio = não cadastrado.
-        "equipment": list(identified.values()),
         "barcodes": barcodes,
         # As bboxes são relativas a esta imagem (já rotacionada e reduzida).
         "image_size": {"width": int(width), "height": int(height)},
         "processing_ms": processing_ms,
     }
+
+    if EQUIPMENT_LOOKUP:
+        # O banco é o filtro final: leituras falsas simplesmente não existem nele.
+        found = _lookup_equipment([b["value"] for b in barcodes])
+        identified = {}
+        for barcode in barcodes:
+            match = found.get(equipment_repo.normalize_code(barcode["value"]))
+            barcode["found"] = match is not None
+            barcode["equipment_id"] = match["id"] if match else None
+            if match:
+                identified.setdefault(match["id"], match)
+        # Equipamentos encontrados (sem repetição, mesmo que serial e MAC
+        # da mesma etiqueta tenham sido lidos). Vazio = não cadastrado.
+        response["equipment"] = list(identified.values())
 
     if debug:
         response["debug"] = {

@@ -1,0 +1,6 @@
+*
+!api.py
+!barcode_pipeline.py
+!equipment_repository.py
+!requirements.txt
+!models/rfdetr_v2.onnx

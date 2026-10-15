@@ -19,6 +19,15 @@ pip install -r requirements.txt
 python api.py
 ```
 
+## Testar pelo Postman
+
+Importe `barcode-api.postman_collection.json` (Ctrl+O no Postman). As variáveis `baseUrl` e `apiKey`
+ficam na aba Variables da coleção. Em cada pedido Decode, escolha a foto em Body → `image` → Select Files.
+O pedido "Decode (debug)" mostra a foto anotada na aba Visualize da resposta.
+
+Se o Postman der `EISDIR` ou um aviso amarelo no arquivo, ligue em Settings → General → Working Directory
+a opção "Allow reading files outside this directory" e escolha a foto de novo.
+
 ## Autenticação
 
 Se a variável `API_KEY` estiver definida, as chamadas precisam do cabeçalho `X-API-Key: <chave>`.

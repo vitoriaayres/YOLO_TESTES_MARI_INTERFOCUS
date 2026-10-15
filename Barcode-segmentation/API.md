@@ -57,7 +57,7 @@ Resposta `200`:
     }
   ],
   "image_size": {"width": 1280, "height": 960},
-  "processing_ms": 8800
+  "processing_ms": 4400
 }
 ```
 
@@ -95,5 +95,7 @@ Sempre JSON: `{"error": {"code": "...", "message": "..."}}`.
 
 ## Desempenho
 
-Cerca de 9 s por foto em média numa CPU comum (mais em fotos difíceis), uma foto por vez por processo.
+No gabarito, numa CPU de notebook (8 núcleos): 4,4 s por foto em média, mediana 3 s, 90% abaixo de 9 s e
+no máximo 12 s. Cada processo lê uma foto por vez; pedidos simultâneos esperam na fila.
+Dentro do Docker Desktop no Windows fica mais lento, porque o container tem menos CPU.
 No gabarito interno (71 fotos, 197 códigos) lê 182 códigos sem nenhuma leitura errada.

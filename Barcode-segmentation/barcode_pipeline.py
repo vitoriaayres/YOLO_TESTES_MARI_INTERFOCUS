@@ -178,6 +178,10 @@ CONFIG = {
     # Tempo máximo (s) somado de todas as segundas passagens de uma imagem.
     # None = sem limite. Caixas que não forem refinadas a tempo ficam sem leitura.
     "second_pass_time_budget_s": None,
+    # Decodificador do OpenCV como última tentativa depois de ZXing e ZBar.
+    # Desligado: no gabarito não leu nenhum código a mais e custava até
+    # metade do tempo das fotos difíceis.
+    "use_opencv_decoder": False,
     # Filtros de leitura. None = aceita tudo (comportamento original).
     # Ex.: {"CODE128", "CODE39"} e r"^[A-Z0-9]{6,}$".
     "allowed_barcode_types": None,
@@ -837,6 +841,8 @@ def text_value(value):
 
 
 def decode_opencv(image):
+    if not CONFIG.get("use_opencv_decoder", False):
+        return None
     detector_class = getattr(cv2, "barcode_BarcodeDetector", None)
     if detector_class is None and hasattr(cv2, "barcode"):
         detector_class = getattr(cv2.barcode, "BarcodeDetector", None)
@@ -1734,11 +1740,10 @@ def decode_refinement_cascade(crops, config=CONFIG, deadline=None):
 
 def decoder_readings_for_variant(variant, crop_name, variant_name):
     readings = []
-    # ZXing-C++ com múltiplas configurações para CODE128 difícil
+    # ZXing-C++ uma vez só: try_rotate + try_downscale já incluem a imagem
+    # original, então as configurações mais restritas que rodavam antes
+    # (e uma repetida) não liam nada a mais e só gastavam tempo.
     zxing_configs = [
-        {"try_rotate": True, "try_downscale": True},
-        {"try_rotate": True, "try_downscale": False},
-        {"try_rotate": False, "try_downscale": True},
         {"try_rotate": True, "try_downscale": True},
     ]
     zxing_found_any = False
@@ -1754,7 +1759,7 @@ def decoder_readings_for_variant(variant, crop_name, variant_name):
             if item.valid and value:
                 readings.append({
                     "value": value, "type": str(item.format),
-                    "decoder": f"ZXing-C++_cfg{config_idx}",
+                    "decoder": "ZXing-C++",
                     "crop": crop_name, "variant": variant_name,
                 })
     # Debug: log se ZXing não achou nada em variantes agressivas
@@ -2694,11 +2699,6 @@ def decode_roboflow_candidates(image, config=CONFIG):
             print(f"DEBUG PROP #{proposal_index}: conf={confidence:.3f} bbox={proposal['bbox']}")
             print(f"  tight_roi: shape={tight.shape if tight is not None else None} decode_roi: shape={decode_roi.shape if decode_roi is not None else None}")
             print(f"  signature: accepted={signature['accepted']} score={signature['score']:.3f} edge_runs={signature['edge_runs']} dark_runs={signature['dark_runs']} valid_row_ratio={signature['valid_row_ratio']:.3f} direction_ratio={signature['direction_ratio']:.3f}")
-            # Salva tight_roi para inspeção visual
-            if tight is not None and tight.size > 0:
-                cv2.imwrite(f"static/outputs/debug_tight_roi_{proposal_index}.png", tight)
-            if decode_roi is not None and decode_roi.size > 0:
-                cv2.imwrite(f"static/outputs/debug_decode_roi_{proposal_index}.png", decode_roi)
         if direct_result is not None:
             source = (
                 "Roboflow -> recorte refinado -> camadas -> leitura"

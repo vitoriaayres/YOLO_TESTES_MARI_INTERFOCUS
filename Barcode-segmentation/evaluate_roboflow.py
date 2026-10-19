@@ -1,8 +1,8 @@
 """
 Compara o pipeline COM e SEM o detector Roboflow numa pasta de imagens.
 
-As imagens passam pelo mesmo pré-processamento da API (rotação EXIF e
-redução para API_MAX_IMAGE_SIDE), então o resultado reflete o que o app
+As imagens passam pelo mesmo pré-processamento da API (rotação EXIF,
+redução para API_MAX_IMAGE_SIDE e filtros de formato/valor), então o resultado reflete o que o app
 mobile vai receber.
 
 Uso:
@@ -23,8 +23,11 @@ import os
 import sys
 from time import perf_counter
 
-import api
 import barcode_pipeline as bp
+from app.core.config import get_settings
+from app.core.exceptions import ApiError
+from app.services.barcode_reader import configure_pipeline
+from app.services.image_codec import decode_upload
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -81,6 +84,8 @@ def main():
         sys.exit(f"Detector não está ativo (backend={bp.ROBOFLOW_BACKEND}); "
                  "confira o modelo ONNX ou a ROBOFLOW_API_KEY no .env.")
 
+    settings = get_settings()
+    configure_pipeline(bp, settings)
     expected_map = load_expected(args.expected)
     files = sorted(
         f for f in os.listdir(args.images)
@@ -91,14 +96,14 @@ def main():
 
     # Aquece o modelo para o tempo da primeira imagem não distorcer a média.
     with open(os.path.join(args.images, files[0]), "rb") as handle:
-        run_pipeline(api._read_image(handle), "warmup", True)
+        run_pipeline(decode_upload(handle.read(), settings.max_image_side), "warmup", True)
 
     rows = []
     for index, name in enumerate(files, 1):
         with open(os.path.join(args.images, name), "rb") as handle:
             try:
-                image = api._read_image(handle)
-            except api.ApiError as error:
+                image = decode_upload(handle.read(), settings.max_image_side)
+            except ApiError as error:
                 print(f"[{index}/{len(files)}] {name}: ignorada ({error.message})")
                 continue
 

@@ -180,6 +180,7 @@ YOLO/*.pt
 
 # Test/debug scripts
 test_*.py
+!**/tests/**/test_*.py
 *_debug.py
 
 # IDE

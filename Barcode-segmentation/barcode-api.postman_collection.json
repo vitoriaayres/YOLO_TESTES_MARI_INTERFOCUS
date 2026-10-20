@@ -6,7 +6,7 @@
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:5001" },
-    { "key": "apiKey", "value": "teste123" }
+    { "key": "apiKey", "value": "troque-esta-chave" }
   ],
   "item": [
     {

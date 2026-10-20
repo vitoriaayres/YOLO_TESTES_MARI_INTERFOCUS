@@ -25,6 +25,12 @@ def test_health_should_report_detector_backend() -> None:
     assert response.json() == {"status": "ok", "detector_backend": "rfdetr"}
 
 
+def test_health_should_return_503_when_detector_is_down() -> None:
+    response = make_client(FakeReader(backend="none")).get("/api/v1/health")
+    assert response.status_code == 503
+    assert response.json() == {"status": "degraded", "detector_backend": "none"}
+
+
 def test_decode_should_return_barcodes_without_debug_field() -> None:
     response = post_image(make_client(FakeReader([make_barcode(1, "ABC123456")])))
     assert response.status_code == 200
@@ -59,6 +65,28 @@ def test_decode_should_return_413_when_image_exceeds_upload_limit() -> None:
     response = post_image(make_client(max_upload_mb=0))
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "image_too_large"
+
+
+def test_decode_should_return_413_before_reading_body_when_content_length_is_too_big() -> None:
+    client = make_client(max_upload_mb=1)
+    response = client.post(
+        "/api/v1/decode",
+        content=b"x",
+        headers={"Content-Type": "multipart/form-data; boundary=b", "Content-Length": str(5 * 1024 * 1024)},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "image_too_large"
+
+
+def test_decode_should_return_503_when_queue_is_full() -> None:
+    client = make_client(max_pending=2)
+    client.app.state.pending_decodes = 2
+    response = post_image(client)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "busy"
+    client.app.state.pending_decodes = 1
+    assert post_image(client).status_code == 200
+    assert client.app.state.pending_decodes == 1
 
 
 def test_decode_should_require_api_key_when_configured() -> None:

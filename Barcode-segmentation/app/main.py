@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.routes import decode, health
+from app.api.upload_limit import UploadLimitMiddleware
 from app.core.config import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
@@ -36,6 +37,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(settings.log_level)
     app = FastAPI(title="barcode-api", version="1.0.0", lifespan=lifespan)
     app.state.settings = settings
+    app.state.pending_decodes = 0
+    app.add_middleware(
+        UploadLimitMiddleware,
+        max_upload_bytes=settings.max_upload_bytes,
+        max_upload_mb=settings.max_upload_mb,
+    )
     register_exception_handlers(app)
     app.include_router(health.router)
     app.include_router(decode.router)

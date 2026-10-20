@@ -7,10 +7,5 @@ services:
     environment:
       API_WORKERS: "2"
       # API_KEY: troque-esta-chave
+    # O health check vem do Dockerfile.
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/v1/health', timeout=5)"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3

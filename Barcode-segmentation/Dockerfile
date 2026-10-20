@@ -4,7 +4,7 @@
 #   docker build -t barcode-api .
 #   docker run -p 5001:5001 barcode-api
 #
-# Ou: docker compose up -d (com health check e reinício automático).
+# Ou: docker compose up -d (com reinício automático).
 FROM python:3.12-slim
 
 # libzbar0: pyzbar; libglib2.0-0: OpenCV headless.
@@ -27,6 +27,14 @@ ENV PYTHONUNBUFFERED=1 \
     API_WORKERS=2
 
 EXPOSE 5001
+
+# Sem root: uma falha numa biblioteca de imagem (OpenCV, zbar) não dá root no container.
+RUN useradd --create-home --uid 1000 api
+USER api
+
+# Fica "unhealthy" se a API não responde ou se o /health devolve 503 (detector fora do ar).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${API_PORT}/api/v1/health', timeout=5)"
 
 # Um processo uvicorn recebe os pedidos; API_WORKERS processos de leitura,
 # cada um com o seu modelo (~650 MB), leem uma foto por vez de uma fila única.

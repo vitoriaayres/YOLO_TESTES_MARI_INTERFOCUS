@@ -1,5 +1,5 @@
 """Rotas de status (sem chave)."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from app.api.dependencies.services import get_decode_runner
 from app.schemas.health import HealthResponse, ServiceInfo
@@ -20,9 +20,17 @@ async def root() -> ServiceInfo:
     )
 
 
-@router.get("/api/v1/health", response_model=HealthResponse)
-async def health(runner: DecodeRunner = Depends(get_decode_runner)) -> HealthResponse:
+@router.get(
+    "/api/v1/health",
+    response_model=HealthResponse,
+    responses={503: {"model": HealthResponse, "description": "Detector fora do ar"}},
+)
+async def health(response: Response, runner: DecodeRunner = Depends(get_decode_runner)) -> HealthResponse:
+    # 503 quando degradado: Docker e load balancer olham só o status code.
+    healthy = runner.is_healthy
+    if not healthy:
+        response.status_code = 503
     return HealthResponse(
-        status="ok" if runner.is_healthy else "degraded",
+        status="ok" if healthy else "degraded",
         detector_backend=runner.detector_backend,
     )

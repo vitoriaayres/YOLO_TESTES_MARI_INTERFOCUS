@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies.auth import require_api_key
+from app.api.dependencies.capacity import reserve_decode_slot
 from app.api.dependencies.services import get_decode_runner
 from app.api.dependencies.uploads import ImageUpload, read_image_upload
 from app.schemas.decode import DecodeResponse
@@ -14,6 +15,7 @@ router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
 @router.post(
     "/decode",
     response_model=DecodeResponse,
+    dependencies=[Depends(reserve_decode_slot)],
     # Sem ?debug=true o campo debug nem aparece na resposta.
     response_model_exclude_unset=True,
     responses={code: {"model": ErrorResponse} for code in (400, 401, 413, 500, 503)},

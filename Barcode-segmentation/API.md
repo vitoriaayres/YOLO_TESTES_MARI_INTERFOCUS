@@ -59,6 +59,9 @@ Sem ela, a API fica aberta (útil se quem hospeda já protege num gateway). `/` 
 {"status": "ok", "detector_backend": "rfdetr"}
 ```
 
+Se o detector não carregou, responde `503` com `"status": "degraded"`. A imagem Docker usa essa rota no
+`HEALTHCHECK`, então o container fica `unhealthy` nesse caso.
+
 ### `POST /api/v1/decode`
 
 `multipart/form-data` com a foto (JPEG ou PNG) no campo `image`. A rotação EXIF do celular é respeitada.
@@ -104,6 +107,7 @@ Sempre JSON: `{"error": {"code": "...", "message": "..."}}`.
 | 413 | `image_too_large` | foto acima de `API_MAX_UPLOAD_MB` |
 | 422 | `validation_error` | parâmetro inválido (ex.: `?debug=talvez`) |
 | 500 | `internal_error` | falha inesperada |
+| 503 | `busy` | já há `API_MAX_PENDING` fotos sendo lidas ou na fila; reenviar em alguns segundos |
 | 503 | `worker_restarted` | um processo de leitura caiu e foi reiniciado; reenviar a foto |
 
 ## Configuração (variáveis de ambiente)
@@ -113,7 +117,8 @@ Sempre JSON: `{"error": {"code": "...", "message": "..."}}`.
 | `API_KEY` | vazia | chave exigida em `X-API-Key` |
 | `API_PORT` | `5001` | porta |
 | `API_WORKERS` | `2` | processos de leitura, cada um com o seu modelo (~650 MB) e uma foto por vez; 1 para cada 2 vCPUs |
-| `API_MAX_UPLOAD_MB` | `10` | tamanho máximo do upload |
+| `API_MAX_PENDING` | `8` | fotos sendo lidas + na fila; acima disso responde `503 busy` (~4 por worker) |
+| `API_MAX_UPLOAD_MB` | `10` | tamanho máximo do upload; acima disso responde `413` pelo `Content-Length`, antes de receber o arquivo |
 | `API_MAX_IMAGE_SIDE` | `2000` | fotos maiores são reduzidas antes da leitura |
 | `API_ALLOWED_FORMATS` | `CODE128,CODE39,CODE93` | formatos aceitos; vazio = todos |
 | `API_VALUE_PATTERN` | `^[A-Z0-9]{6,}$` | regex que o valor precisa casar; vazio = qualquer |
@@ -121,6 +126,16 @@ Sempre JSON: `{"error": {"code": "...", "message": "..."}}`.
 | `API_SPLIT_UNRESOLVED_BOXES` | ligado | divide caixas com códigos empilhados |
 | `API_LOG_LEVEL` | `INFO` | nível dos logs |
 | `RFDETR_ONNX_PATH` | `models/rfdetr_v2.onnx` | caminho do modelo |
+
+## Produção
+
+O container roda sem root e tem `HEALTHCHECK`. Fica com quem hospeda:
+
+- **HTTPS**: colocar um proxy reverso com TLS (Nginx, Caddy ou o load balancer) na frente da porta 5001.
+- **Limites no proxy**: upload de pelo menos 10 MB (no Nginx, `client_max_body_size 10m`) e timeout acima
+  de 30 s.
+- **Chave**: definir `API_KEY` se a URL ficar acessível de fora da rede interna. Sem chave, qualquer um que
+  encontre a porta pode mandar fotos. O `/docs` continua aberto, mas só mostra o contrato.
 
 ## Desempenho
 

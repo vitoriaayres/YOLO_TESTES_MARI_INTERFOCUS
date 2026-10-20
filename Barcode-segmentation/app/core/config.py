@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Processos de leitura: cada um carrega o modelo (~650 MB) e lê uma foto
     # por vez, usando ~2 núcleos. Regra prática: 1 para cada 2 vCPUs.
     workers: int = Field(default=2, ge=1)
+    # Fotos sendo lidas + esperando na fila. Acima disso o /decode responde 503
+    # na hora, em vez de deixar a foto esperar além do timeout de quem chamou.
+    # Com 2 workers, 8 pedidos levam ~30 s para esvaziar no pior caso.
+    max_pending: int = Field(default=8, ge=1)
     max_upload_mb: int = 10
     # Imagens maiores que isso são reduzidas antes do pipeline; fotos de
     # celular (12+ MP) não ajudam a leitura e deixam o processamento mais lento.

@@ -4117,6 +4117,10 @@ def analyze_barcode_image(
     table.attrs["roboflow_unresolved"] = max(
         0, total_proposals - resolved_proposals
     )
+    table.attrs["roboflow_proposals"] = [
+        {"bbox": proposal["bbox"], "confidence": proposal["confidence"]}
+        for proposal in roboflow_debug.get("proposals", [])
+    ]
     if show_output:
         show_bgr(
             annotated,

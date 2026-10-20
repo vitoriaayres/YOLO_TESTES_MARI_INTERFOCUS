@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 
+from app import __version__
+
 from app.main import create_app
 from app.services.decode_runner import ThreadDecodeRunner
 from app.services.decode_service import DecodeService
@@ -22,13 +24,13 @@ def post_image(client: TestClient, data: bytes | None = None, **kwargs: object):
 def test_health_should_report_detector_backend() -> None:
     response = make_client().get("/api/v1/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "detector_backend": "rfdetr"}
+    assert response.json() == {"status": "ok", "detector_backend": "rfdetr", "version": __version__}
 
 
 def test_health_should_return_503_when_detector_is_down() -> None:
     response = make_client(FakeReader(backend="none")).get("/api/v1/health")
     assert response.status_code == 503
-    assert response.json() == {"status": "degraded", "detector_backend": "none"}
+    assert response.json() == {"status": "degraded", "detector_backend": "none", "version": __version__}
 
 
 def test_decode_should_return_barcodes_without_debug_field() -> None:

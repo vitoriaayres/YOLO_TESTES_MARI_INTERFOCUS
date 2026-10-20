@@ -6,7 +6,7 @@ from PIL import Image
 
 from app.core.config import Settings
 from app.schemas.decode import Barcode
-from app.services.barcode_reader import PipelineReading
+from app.services.barcode_reader import Detection, PipelineReading
 
 
 def make_settings(**overrides: object) -> Settings:
@@ -27,9 +27,15 @@ def jpeg_bytes(width: int = 64, height: int = 48) -> bytes:
 
 
 class FakeReader:
-    def __init__(self, barcodes: list[Barcode] | None = None, backend: str = "rfdetr") -> None:
+    def __init__(
+        self,
+        barcodes: list[Barcode] | None = None,
+        backend: str = "rfdetr",
+        detections: list[Detection] | None = None,
+    ) -> None:
         self.barcodes = barcodes or []
         self.backend = backend
+        self.detections = detections or []
         self.images: list[np.ndarray] = []
 
     @property
@@ -38,4 +44,4 @@ class FakeReader:
 
     def read(self, image: np.ndarray, image_name: str) -> PipelineReading:
         self.images.append(image)
-        return PipelineReading(self.barcodes, annotated=image, visual_stack=None)
+        return PipelineReading(self.barcodes, annotated=image, visual_stack=None, detections=self.detections)

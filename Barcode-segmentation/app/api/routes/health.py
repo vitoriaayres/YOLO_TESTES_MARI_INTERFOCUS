@@ -1,6 +1,7 @@
 """Rotas de status (sem chave)."""
 from fastapi import APIRouter, Depends, Response
 
+from app import __version__
 from app.api.dependencies.services import get_decode_runner
 from app.schemas.health import HealthResponse, ServiceInfo
 from app.services.decode_runner import DecodeRunner
@@ -33,4 +34,5 @@ async def health(response: Response, runner: DecodeRunner = Depends(get_decode_r
     return HealthResponse(
         status="ok" if healthy else "degraded",
         detector_backend=runner.detector_backend,
+        version=__version__,
     )

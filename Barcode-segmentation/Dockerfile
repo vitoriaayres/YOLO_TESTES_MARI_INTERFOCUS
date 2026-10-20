@@ -1,8 +1,8 @@
 # API de identificação e decodificação de códigos de barras (FastAPI + RF-DETR).
 # O modelo não está no git: antes do build, coloque o arquivo em models/rfdetr_v2.onnx.
 #
-#   docker build -t barcode-api .
-#   docker run -p 5001:5001 barcode-api
+#   docker build -t barcode-api:1.1.0 -t barcode-api:latest .   (versão de app/__init__.py)
+#   docker run -p 5001:5001 barcode-api:1.1.0
 #
 # Ou: docker compose up -d (com reinício automático).
 FROM python:3.12-slim

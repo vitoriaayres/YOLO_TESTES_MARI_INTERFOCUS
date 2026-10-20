@@ -2,7 +2,7 @@
 import importlib
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any, Protocol
 
@@ -17,10 +17,18 @@ ACTIVE_DETECTORS = {"rfdetr", "local", "hosted"}
 
 
 @dataclass
+class Detection:
+    """Caixa do detector, lida ou não. bbox em [x1, y1, x2, y2]."""
+    bbox: list[int]
+    confidence: float
+
+
+@dataclass
 class PipelineReading:
     barcodes: list[Barcode]
     annotated: np.ndarray | None
     visual_stack: np.ndarray | None
+    detections: list[Detection] = field(default_factory=list)
 
 
 class BarcodeReader(Protocol):
@@ -52,11 +60,17 @@ class PipelineBarcodeReader:
 
     def read(self, image: np.ndarray, image_name: str) -> PipelineReading:
         with self._lock:
-            regions, annotated, _table, visual_stack = self._pipeline.analyze_barcode_image(
+            regions, annotated, table, visual_stack = self._pipeline.analyze_barcode_image(
                 image, image_name=image_name, show_debug=False, show_output=False
             )
         barcodes = [self._to_barcode(region, index) for index, region in enumerate(regions, 1)]
-        return PipelineReading(barcodes, annotated, visual_stack)
+        detections = [self._to_detection(p) for p in table.attrs.get("roboflow_proposals", [])]
+        return PipelineReading(barcodes, annotated, visual_stack, detections)
+
+    @staticmethod
+    def _to_detection(proposal: dict[str, Any]) -> Detection:
+        x, y, w, h = (int(v) for v in proposal["bbox"])
+        return Detection(bbox=[x, y, x + w, y + h], confidence=round(float(proposal["confidence"]), 4))
 
     def _to_barcode(self, region: dict[str, Any], fallback_index: int) -> Barcode:
         x, y, w, h = region["bbox"]

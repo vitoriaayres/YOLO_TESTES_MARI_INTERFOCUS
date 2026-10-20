@@ -2,7 +2,8 @@ import base64
 import pickle
 
 from app.core.exceptions import ApiError
-from app.services.decode_service import DecodeService, unique_barcodes
+from app.services.barcode_reader import Detection
+from app.services.decode_service import DecodeService, unique_barcodes, unread_boxes
 from tests.fakes import FakeReader, jpeg_bytes, make_barcode, make_settings
 
 
@@ -40,6 +41,30 @@ def test_decode_should_return_annotated_jpeg_when_debug_is_requested() -> None:
     response = service.decode(jpeg_bytes(), "foto.jpg", debug=True)
     assert base64.b64decode(response.debug.annotated_jpeg_base64)[:2] == b"\xff\xd8"
     assert response.debug.visual_stack_jpeg_base64 is None
+
+
+def test_unread_boxes_should_skip_boxes_covered_by_a_reading() -> None:
+    read = make_barcode(1, "ABC123456")  # bbox [0, 0, 10, 10]
+    detections = [
+        Detection(bbox=[0, 0, 20, 10], confidence=0.9),  # metade coberta pela leitura
+        Detection(bbox=[0, 50, 10, 60], confidence=0.8),  # longe de qualquer leitura
+        Detection(bbox=[0, 30, 10, 40], confidence=0.7),
+    ]
+    unread = unread_boxes(detections, [read], min_confidence=0.0)
+    assert [box.bbox for box in unread] == [[0, 30, 10, 40], [0, 50, 10, 60]]
+
+
+def test_unread_boxes_should_ignore_weak_detections() -> None:
+    detections = [Detection(bbox=[0, 0, 10, 10], confidence=0.2), Detection(bbox=[0, 20, 10, 30], confidence=0.6)]
+    unread = unread_boxes(detections, [], min_confidence=0.5)
+    assert [box.confidence for box in unread] == [0.6]
+
+
+def test_decode_should_report_unread_boxes() -> None:
+    reader = FakeReader(detections=[Detection(bbox=[1, 2, 30, 20], confidence=0.8)])
+    response = DecodeService(reader, make_settings()).decode(jpeg_bytes(), "foto.jpg", debug=False)
+    assert response.barcodes == []
+    assert [(box.bbox, box.confidence) for box in response.unread] == [([1, 2, 30, 20], 0.8)]
 
 
 def test_is_healthy_should_be_false_when_detector_is_not_loaded() -> None:

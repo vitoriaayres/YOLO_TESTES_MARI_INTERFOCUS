@@ -12,9 +12,13 @@ Feita em FastAPI (Python 3.12), servida pelo uvicorn. Documentação interativa 
 ```sh
 docker compose up -d --build        # com health check e reinício automático
 # ou
-docker build -t barcode-api .
-docker run -p 5001:5001 barcode-api
+docker build -t barcode-api:1.1.0 -t barcode-api:latest .
+docker run -p 5001:5001 barcode-api:1.1.0
 ```
+
+**Versão**: fica em `app/__init__.py` (e igual no `pyproject.toml`; um teste confere). A imagem leva a mesma
+tag, e o `/api/v1/health` mostra a versão que está no ar. Campo novo ou erro novo sobe o segundo número
+(1.1 → 1.2); mudança que quebra quem já usa a API sobe o primeiro (1.x → 2.0).
 
 **Sem Docker** (desenvolvimento):
 
@@ -56,7 +60,7 @@ Sem ela, a API fica aberta (útil se quem hospeda já protege num gateway). `/` 
 ### `GET /api/v1/health`
 
 ```json
-{"status": "ok", "detector_backend": "rfdetr"}
+{"status": "ok", "detector_backend": "rfdetr", "version": "1.1.0"}
 ```
 
 Se o detector não carregou, responde `503` com `"status": "degraded"`. A imagem Docker usa essa rota no
@@ -86,6 +90,9 @@ Resposta `200`:
       "decoder": "pyzbar"
     }
   ],
+  "unread": [
+    {"confidence": 0.77, "bbox": [432, 432, 833, 481]}
+  ],
   "image_size": {"width": 1280, "height": 960},
   "processing_ms": 4400
 }
@@ -94,6 +101,10 @@ Resposta `200`:
 - `barcodes`: cada valor aparece uma vez, de cima para baixo. Lista vazia = nenhum código lido.
 - `bbox`: `[x1, y1, x2, y2]` em pixels de `image_size` (a foto já rotacionada e, se tiver mais de 2000 px, reduzida).
 - `confidence`: confiança do detector para a caixa (0 a 1).
+- `unread`: caixas em que o detector achou um código mas nenhum valor foi lido (lista vazia = nada
+  pendente). Serve para o app pedir outra foto, mais de perto. No gabarito, com o corte padrão de 0,5,
+  aparece em 11 das 12 fotos com código faltando e, por engano, em 6 das 59 fotos completas (código EAN
+  ignorado de propósito, grade de ventilação do aparelho).
 - `?debug=true` acrescenta `debug.annotated_jpeg_base64` com a foto anotada.
 
 ### Erros
@@ -124,6 +135,7 @@ Sempre JSON: `{"error": {"code": "...", "message": "..."}}`.
 | `API_VALUE_PATTERN` | `^[A-Z0-9]{6,}$` | regex que o valor precisa casar; vazio = qualquer |
 | `API_SECOND_PASS_BUDGET_S` | `6` | tempo máximo (s) para insistir nas caixas difíceis |
 | `API_SPLIT_UNRESOLVED_BOXES` | ligado | divide caixas com códigos empilhados |
+| `API_UNREAD_MIN_CONFIDENCE` | `0.5` | confiança mínima de uma caixa não lida para entrar em `unread` |
 | `API_LOG_LEVEL` | `INFO` | nível dos logs |
 | `RFDETR_ONNX_PATH` | `models/rfdetr_v2.onnx` | caminho do modelo |
 

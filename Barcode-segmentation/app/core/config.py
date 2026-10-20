@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     # Divide caixas que englobam códigos empilhados. None = ligado só com o
     # RF-DETR (leva o v2 de 179 para 180/197 no gabarito).
     split_unresolved_boxes: bool | None = None
+    # Confiança mínima de uma caixa do detector para entrar em "unread"
+    # (código achado mas não lido). No gabarito, com 0,5: avisa em 11 das 12
+    # fotos com código faltando e dá alarme falso em 6 das 59 completas (EAN
+    # ignorado de propósito, grade de ventilação). Abaixo de 0,3 os alarmes
+    # falsos passam de 12.
+    unread_min_confidence: float = Field(default=0.5, ge=0, le=1)
     log_level: str = "INFO"
 
     @field_validator("key", "value_pattern", "split_unresolved_boxes", mode="before")

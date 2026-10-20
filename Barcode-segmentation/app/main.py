@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app import __version__
 from app.api.routes import decode, health
 from app.api.upload_limit import UploadLimitMiddleware
 from app.core.config import Settings, get_settings
@@ -35,7 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
-    app = FastAPI(title="barcode-api", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="barcode-api", version=__version__, lifespan=lifespan)
     app.state.settings = settings
     app.state.pending_decodes = 0
     app.add_middleware(

@@ -1,4 +1,13 @@
+import tomllib
+from pathlib import Path
+
+from app import __version__
 from tests.fakes import make_settings
+
+
+def test_version_should_match_pyproject() -> None:
+    pyproject = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["version"] == __version__
 
 
 def test_settings_should_treat_empty_variables_as_disabled(monkeypatch) -> None:

@@ -1,6 +1,6 @@
 [project]
 name = "barcode-api"
-version = "1.0.0"
+version = "1.1.0"
 description = "API de identificação e decodificação de códigos de barras (RF-DETR + decodificadores)"
 requires-python = ">=3.12,<3.13"
 # Dependências fixadas em requirements.txt (e requirements-dev.txt para os testes).

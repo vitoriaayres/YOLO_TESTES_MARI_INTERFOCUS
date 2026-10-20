@@ -173,3 +173,6 @@ cython_debug/
 /static/outputs/*
 /static/uploads/*
 /checkpoints/*.pt
+
+# Cópia local do darknet (YOLO antigo, fora da API; ver branch treino_rfdetr)
+/YOLO/

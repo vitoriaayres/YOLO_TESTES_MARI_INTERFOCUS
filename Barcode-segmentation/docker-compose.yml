@@ -1,0 +1,16 @@
+services:
+  api:
+    build: .
+    image: barcode-api
+    ports:
+      - "5001:5001"
+    environment:
+      API_WORKERS: "2"
+      # API_KEY: troque-esta-chave
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3

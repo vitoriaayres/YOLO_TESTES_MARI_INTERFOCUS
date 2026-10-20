@@ -1,0 +1,6 @@
+*
+!app/
+!barcode_pipeline.py
+!requirements.txt
+!models/rfdetr_v2.onnx
+**/__pycache__

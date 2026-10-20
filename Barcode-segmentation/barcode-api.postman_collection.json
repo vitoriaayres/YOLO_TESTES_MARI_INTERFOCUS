@@ -1,0 +1,75 @@
+{
+  "info": {
+    "name": "Barcode API",
+    "description": "API de identificação e decodificação de códigos de barras. Ajuste as variáveis baseUrl e apiKey na aba Variables da coleção. Contrato completo em API.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5001" },
+    { "key": "apiKey", "value": "troque-esta-chave" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/health"
+      }
+    },
+    {
+      "name": "Decode",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+        "body": {
+          "mode": "formdata",
+          "formdata": [{ "key": "image", "type": "file", "src": [] }]
+        },
+        "url": "{{baseUrl}}/api/v1/decode"
+      }
+    },
+    {
+      "name": "Decode (debug, com foto anotada)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+        "body": {
+          "mode": "formdata",
+          "formdata": [{ "key": "image", "type": "file", "src": [] }]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/decode?debug=true",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "decode"],
+          "query": [{ "key": "debug", "value": "true" }]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Mostra a foto anotada na aba Visualize da resposta.",
+              "const json = pm.response.json();",
+              "const foto = json.debug && json.debug.annotated_jpeg_base64;",
+              "const codigos = (json.barcodes || []).map(b => b.value + ' (' + b.format + ')');",
+              "pm.visualizer.set('<ul>{{#each codigos}}<li>{{this}}</li>{{else}}<li>Nenhum código lido</li>{{/each}}</ul>{{#if foto}}<img style=\"max-width:100%\" src=\"data:image/jpeg;base64,{{foto}}\">{{/if}}', { codigos: codigos, foto: foto });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Decode sem chave (espera 401)",
+      "request": {
+        "method": "POST",
+        "body": {
+          "mode": "formdata",
+          "formdata": [{ "key": "image", "type": "file", "src": [] }]
+        },
+        "url": "{{baseUrl}}/api/v1/decode"
+      }
+    }
+  ]
+}

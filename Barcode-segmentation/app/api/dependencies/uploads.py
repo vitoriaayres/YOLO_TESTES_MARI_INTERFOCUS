@@ -13,7 +13,10 @@ class ImageUpload:
     filename: str
 
 
-async def read_image_upload(request: Request, image: UploadFile | None = File(None)) -> ImageUpload:
+# "UploadFile" e não "UploadFile | None": com o None o campo vira anyOf no
+# OpenAPI e o /docs mostra uma caixa de texto em vez do seletor de arquivo.
+# O default None continua valendo e cai no erro missing_image abaixo.
+async def read_image_upload(request: Request, image: UploadFile = File(None)) -> ImageUpload:
     if image is None:
         raise ApiError(400, "missing_image", 'Envie a imagem como multipart/form-data no campo "image".')
     settings: Settings = request.app.state.settings

@@ -4,8 +4,15 @@ services:
     image: barcode-api:1.1.0
     ports:
       - "5001:5001"
+    # Valores lidos do .env ao lado deste arquivo (fora do git). Sem .env:
+    # 2 workers e API sem chave, como no desenvolvimento.
     environment:
-      API_WORKERS: "2"
-      # API_KEY: troque-esta-chave
+      API_WORKERS: ${API_WORKERS:-2}
+      API_KEY: ${API_KEY:-}
     # O health check vem do Dockerfile.
     restart: unless-stopped
+    # Sem limite, o log do container cresce até encher o disco.
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

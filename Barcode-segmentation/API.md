@@ -16,6 +16,24 @@ docker build -t barcode-api:1.1.0 -t barcode-api:latest .
 docker run -p 5001:5001 barcode-api:1.1.0
 ```
 
+**Servidor de teste** (acesso por SSH, ex.: MobaXterm):
+
+```sh
+git clone https://github.com/vitoriaayres/YOLO_TESTES_MARI_INTERFOCUS
+cd YOLO_TESTES_MARI_INTERFOCUS/Barcode-segmentation
+# 1. Envie models/rfdetr_v2.onnx para a pasta models/ (no Moba: arrastar para o painel SFTP).
+# 2. Crie o .env com a chave (fica só no servidor; o .env está no .gitignore):
+echo "API_KEY=$(openssl rand -hex 32)" > .env && cat .env     # guarde a chave para os clientes
+# Opcional no .env: API_WORKERS=<vCPUs / 2>
+# 3. Suba e espere o status "healthy" (~1 min):
+docker compose up -d --build
+docker compose ps
+docker compose logs api | grep chave                           # "API pronta (chave exigida)"
+```
+
+Para atualizar: `git pull` e `docker compose up -d --build`. Para trocar a chave: edite o `.env` e rode
+`docker compose up -d`. A API responde em HTTP; fora da rede interna ou VPN, coloque um proxy com HTTPS na frente.
+
 **Versão**: fica em `app/__init__.py` (e igual no `pyproject.toml`; um teste confere). A imagem leva a mesma
 tag, e o `/api/v1/health` mostra a versão que está no ar. Campo novo ou erro novo sobe o segundo número
 (1.1 → 1.2); mudança que quebra quem já usa a API sobe o primeiro (1.x → 2.0).
